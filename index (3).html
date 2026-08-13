@@ -1,0 +1,640 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HyperPulse — Hyperliquid HyperCore Monitor</title>
+<meta name="description" content="Live whale trades, liquidations and market state on Hyperliquid HyperCore, powered by Quicknode SQL Explorer.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:        #090b10;
+    --panel:     #10141c;
+    --panel-2:   #0c0f16;
+    --border:    #1e2530;
+    --border-lt: #2a3140;
+    --text:      #e8ecf1;
+    --text-dim:  #6b7685;
+    --text-dim2: #454e5c;
+    --amber:     #ffb020;
+    --amber-dim: #7a5a1c;
+    --up:        #2dd4a7;
+    --up-dim:    #123d33;
+    --down:      #ff5470;
+    --down-dim:  #481521;
+    --mono: 'IBM Plex Mono', ui-monospace, monospace;
+    --sans: 'Space Grotesk', system-ui, sans-serif;
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  html,body{
+    background:var(--bg);
+    color:var(--text);
+    font-family:var(--sans);
+    -webkit-font-smoothing:antialiased;
+  }
+  body{
+    background-image:
+      radial-gradient(circle at 15% 0%, rgba(255,176,32,0.05), transparent 45%),
+      radial-gradient(circle at 85% 100%, rgba(45,212,167,0.04), transparent 45%);
+    min-height:100vh;
+  }
+  .app{ max-width:1280px; margin:0 auto; padding:28px 20px 60px; }
+
+  /* ---------- header ---------- */
+  header{
+    display:flex; align-items:flex-start; justify-content:space-between;
+    flex-wrap:wrap; gap:16px; margin-bottom:22px;
+  }
+  .brand{ display:flex; align-items:center; gap:12px; }
+  .brand-mark{
+    width:38px; height:38px; border-radius:9px;
+    background:linear-gradient(155deg, var(--amber), #c97e00);
+    display:flex; align-items:center; justify-content:center;
+    box-shadow:0 0 22px rgba(255,176,32,0.25);
+    flex-shrink:0;
+  }
+  .brand-mark svg{ width:20px; height:20px; }
+  h1{
+    font-size:20px; font-weight:700; letter-spacing:0.02em;
+  }
+  .tagline{
+    font-family:var(--mono); font-size:11.5px; color:var(--text-dim);
+    letter-spacing:0.03em; margin-top:2px;
+  }
+  .tagline b{ color:var(--text-dim); font-weight:600; }
+  .status-block{ text-align:right; font-family:var(--mono); font-size:11.5px; }
+  .status-row{
+    display:flex; align-items:center; gap:8px; justify-content:flex-end;
+    color:var(--text-dim);
+  }
+  .dot{ width:7px; height:7px; border-radius:50%; flex-shrink:0; }
+  .dot.live{ background:var(--up); box-shadow:0 0 8px var(--up); animation:pulse-dot 1.8s infinite; }
+  .dot.demo{ background:var(--amber); box-shadow:0 0 8px var(--amber); animation:pulse-dot 1.8s infinite; }
+  @keyframes pulse-dot{ 0%,100%{opacity:1;} 50%{opacity:0.35;} }
+  .status-label{ color:var(--text); font-weight:600; letter-spacing:0.04em; }
+  .cluster{ color:var(--text-dim2); margin-top:3px; }
+
+  .demo-banner{
+    display:none;
+    font-family:var(--mono); font-size:11.5px; color:var(--amber);
+    background:rgba(255,176,32,0.06); border:1px solid var(--amber-dim);
+    border-radius:8px; padding:9px 14px; margin-bottom:18px;
+    letter-spacing:0.01em; line-height:1.6;
+  }
+  .demo-banner.show{ display:block; }
+
+  /* ---------- stat strip ---------- */
+  .stats{
+    display:grid; grid-template-columns:repeat(4,1fr); gap:1px;
+    background:var(--border); border:1px solid var(--border);
+    border-radius:10px; overflow:hidden; margin-bottom:18px;
+  }
+  .stat{ background:var(--panel); padding:14px 16px; }
+  .stat-label{
+    font-family:var(--mono); font-size:10px; text-transform:uppercase;
+    letter-spacing:0.08em; color:var(--text-dim); margin-bottom:6px;
+  }
+  .stat-value{ font-family:var(--mono); font-size:19px; font-weight:600; }
+  .stat-value.down{ color:var(--down); }
+  .stat-value.up{ color:var(--up); }
+
+  /* ---------- seismograph ---------- */
+  .seismo-wrap{
+    border:1px solid var(--border); border-radius:10px; background:var(--panel-2);
+    margin-bottom:18px; overflow:hidden; position:relative;
+  }
+  .seismo-head{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:10px 14px 0 14px;
+  }
+  .seismo-title{
+    font-family:var(--mono); font-size:10.5px; text-transform:uppercase;
+    letter-spacing:0.09em; color:var(--text-dim);
+  }
+  .seismo-legend{ display:flex; gap:14px; font-family:var(--mono); font-size:10px; color:var(--text-dim2); }
+  .seismo-legend span{ display:inline-flex; align-items:center; gap:5px; }
+  .leg-swatch{ width:7px; height:7px; border-radius:2px; }
+  canvas#seismo{ display:block; width:100%; height:132px; }
+
+  /* ---------- panels grid ---------- */
+  .grid{
+    display:grid; grid-template-columns:1.15fr 1fr 0.95fr; gap:14px;
+  }
+  @media (max-width:940px){ .grid{ grid-template-columns:1fr; } .stats{ grid-template-columns:repeat(2,1fr); } }
+
+  .panel{
+    border:1px solid var(--border); border-radius:10px; background:var(--panel);
+    display:flex; flex-direction:column; min-height:420px; max-height:420px;
+  }
+  .panel-head{
+    padding:13px 15px; border-bottom:1px solid var(--border);
+    display:flex; align-items:center; justify-content:space-between;
+  }
+  .panel-title{ font-size:13.5px; font-weight:600; display:flex; align-items:center; gap:8px; }
+  .panel-title .sw{ width:8px; height:8px; border-radius:2px; }
+  .panel-sub{ font-family:var(--mono); font-size:10px; color:var(--text-dim2); }
+  .panel-body{ overflow-y:auto; flex:1; }
+  .panel-body::-webkit-scrollbar{ width:6px; }
+  .panel-body::-webkit-scrollbar-thumb{ background:var(--border-lt); border-radius:4px; }
+
+  .row{
+    display:grid; grid-template-columns:auto 1fr auto; gap:10px;
+    align-items:center; padding:9px 15px; border-bottom:1px solid var(--border);
+    font-family:var(--mono); font-size:12px; animation:rowIn 0.4s ease;
+  }
+  @keyframes rowIn{ from{ background:rgba(255,176,32,0.09); } to{ background:transparent; } }
+  .row:last-child{ border-bottom:none; }
+  .side-badge{
+    font-size:10px; font-weight:600; padding:2px 6px; border-radius:4px;
+    letter-spacing:0.03em; text-align:center; min-width:34px;
+  }
+  .side-badge.buy{ background:var(--up-dim); color:var(--up); }
+  .side-badge.sell{ background:var(--down-dim); color:var(--down); }
+  .side-badge.liq{ background:var(--down-dim); color:var(--down); }
+  .row-mid{ overflow:hidden; }
+  .coin{ font-weight:600; color:var(--text); }
+  .addr{ color:var(--text-dim); font-size:10.5px; margin-top:1px; }
+  .row-right{ text-align:right; }
+  .notional{ font-weight:600; }
+  .ago{ color:var(--text-dim2); font-size:10px; margin-top:1px; }
+
+  .mkt-row{
+    display:grid; grid-template-columns:1fr auto auto; gap:10px; align-items:center;
+    padding:9px 15px; border-bottom:1px solid var(--border); font-family:var(--mono); font-size:12px;
+  }
+  .mkt-row:last-child{ border-bottom:none; }
+  .mkt-coin{ font-weight:600; }
+  .mkt-vol{ color:var(--text-dim); font-size:10.5px; margin-top:1px; }
+  .mkt-px{ text-align:right; }
+  .mkt-fund{ text-align:right; font-size:10.5px; }
+
+  .empty{
+    padding:30px 15px; text-align:center; color:var(--text-dim2);
+    font-family:var(--mono); font-size:11.5px; line-height:1.7;
+  }
+
+  footer{
+    margin-top:22px; display:flex; justify-content:space-between; flex-wrap:wrap; gap:10px;
+    font-family:var(--mono); font-size:10.5px; color:var(--text-dim2);
+  }
+  footer a{ color:var(--text-dim); text-decoration:none; border-bottom:1px dotted var(--border-lt); }
+  footer a:hover{ color:var(--amber); border-color:var(--amber); }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <header>
+    <div class="brand">
+      <div class="brand-mark">
+        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M13 2 4 14h6l-1 8 9-12h-6l1-8Z" fill="#0a0d12"/>
+        </svg>
+      </div>
+      <div>
+        <h1>HyperPulse</h1>
+        <div class="tagline">whale trades &amp; liquidations on <b>Hyperliquid HyperCore</b> · via Quicknode SQL Explorer</div>
+      </div>
+    </div>
+    <div class="status-block">
+      <div class="status-row">
+        <span class="dot demo" id="statusDot"></span>
+        <span class="status-label" id="statusLabel">CONNECTING…</span>
+      </div>
+      <div class="cluster">cluster: hyperliquid-core-mainnet · updated <span id="lastUpdated">—</span></div>
+    </div>
+  </header>
+
+  <div class="demo-banner" id="demoBanner">
+    Running on simulated data — this panel updates itself with a realistic but fabricated feed. Add a <b style="color:var(--amber)">QUICKNODE_API_KEY</b> environment variable in Vercel to switch to live SQL Explorer data. Structure, fields and queries are identical either way.
+  </div>
+
+  <div class="stats">
+    <div class="stat">
+      <div class="stat-label">24h volume</div>
+      <div class="stat-value" id="statVolume">—</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">24h liquidations</div>
+      <div class="stat-value down" id="statLiqVol">—</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">active traders (24h)</div>
+      <div class="stat-value" id="statTraders">—</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">largest trade today</div>
+      <div class="stat-value up" id="statBiggest">—</div>
+    </div>
+  </div>
+
+  <div class="seismo-wrap">
+    <div class="seismo-head">
+      <div class="seismo-title">Market shock trace — whale flow &amp; liquidations</div>
+      <div class="seismo-legend">
+        <span><i class="leg-swatch" style="background:var(--up)"></i> whale buy</span>
+        <span><i class="leg-swatch" style="background:var(--down)"></i> whale sell / liquidation</span>
+      </div>
+    </div>
+    <canvas id="seismo"></canvas>
+  </div>
+
+  <div class="grid">
+
+    <div class="panel">
+      <div class="panel-head">
+        <div class="panel-title"><span class="sw" style="background:var(--up)"></span>Whale trades</div>
+        <div class="panel-sub">notional &gt; $50K</div>
+      </div>
+      <div class="panel-body" id="whaleBody">
+        <div class="empty">waiting for first trade…</div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head">
+        <div class="panel-title"><span class="sw" style="background:var(--down)"></span>Liquidations</div>
+        <div class="panel-sub">last 24h</div>
+      </div>
+      <div class="panel-body" id="liqBody">
+        <div class="empty">waiting for first liquidation…</div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head">
+        <div class="panel-title"><span class="sw" style="background:var(--amber)"></span>Markets</div>
+        <div class="panel-sub">by 24h volume</div>
+      </div>
+      <div class="panel-body" id="marketBody">
+        <div class="empty">loading market context…</div>
+      </div>
+    </div>
+
+  </div>
+
+  <footer>
+    <span>Built by Ferz · SQL Explorer + HyperCore streams, same lineage as the x402 demo</span>
+    <span><a href="https://www.quicknode.com/docs/sql-explorer" target="_blank" rel="noopener">Quicknode SQL Explorer docs</a></span>
+  </footer>
+
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  /* ---------------- utils ---------------- */
+  function fmtUSD(n){
+    n = Number(n) || 0;
+    var sign = n < 0 ? "-" : "";
+    n = Math.abs(n);
+    if(n >= 1e9) return sign + "$" + (n/1e9).toFixed(2) + "B";
+    if(n >= 1e6) return sign + "$" + (n/1e6).toFixed(2) + "M";
+    if(n >= 1e3) return sign + "$" + (n/1e3).toFixed(1) + "K";
+    return sign + "$" + n.toFixed(0);
+  }
+  function fmtPx(n){
+    n = Number(n) || 0;
+    if(n >= 1000) return n.toFixed(1);
+    if(n >= 1) return n.toFixed(3);
+    return n.toFixed(5);
+  }
+  function shortAddr(a){
+    if(!a || typeof a !== "string") return "—";
+    return a.slice(0,6) + "…" + a.slice(-4);
+  }
+  function timeAgo(ts){
+    var t = new Date(ts).getTime();
+    if(isNaN(t)) return "";
+    var s = Math.max(0, Math.floor((Date.now() - t)/1000));
+    if(s < 60) return s + "s ago";
+    if(s < 3600) return Math.floor(s/60) + "m ago";
+    return Math.floor(s/3600) + "h ago";
+  }
+  function el(tag, cls, html){
+    var e = document.createElement(tag);
+    if(cls) e.className = cls;
+    if(html !== undefined) e.innerHTML = html;
+    return e;
+  }
+  /* ---------------- state ---------------- */
+  var isLive = false;
+  var whaleIds = new Set();
+  var liqIds = new Set();
+
+  /* ---------------- seismograph ---------------- */
+  var canvas = document.getElementById("seismo");
+  var ctx = canvas.getContext("2d");
+  var trace = []; // {v: -1..1, c: 'up'|'down'|'idle'}
+  var TRACE_LEN = 220;
+  for(var i=0;i<TRACE_LEN;i++) trace.push({v:0, c:"idle"});
+
+  function pushTrace(v, c){
+    trace.push({v:v, c:c});
+    if(trace.length > TRACE_LEN) trace.shift();
+  }
+  function idleTick(){
+    pushTrace((Math.random()-0.5)*0.08, "idle");
+  }
+
+  function resizeCanvas(){
+    var rect = canvas.getBoundingClientRect();
+    var dpr = window.devicePixelRatio || 1;
+    canvas.width = rect.width * dpr;
+    canvas.height = 132 * dpr;
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+  }
+  window.addEventListener("resize", resizeCanvas);
+
+  function drawSeismo(){
+    var rect = canvas.getBoundingClientRect();
+    var w = rect.width, h = 132;
+    ctx.clearRect(0,0,w,h);
+    var mid = h/2;
+
+    // grid
+    ctx.strokeStyle = "rgba(255,255,255,0.035)";
+    ctx.lineWidth = 1;
+    for(var gy=1; gy<4; gy++){
+      var y = (h/4)*gy;
+      ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(w,y); ctx.stroke();
+    }
+
+    var barW = w / TRACE_LEN;
+    for(var i=0;i<trace.length;i++){
+      var t = trace[i];
+      var barH = Math.abs(t.v) * (mid - 8);
+      var x = i * barW;
+      var color = t.c === "up" ? "#2dd4a7" : t.c === "down" ? "#ff5470" : "rgba(255,255,255,0.14)";
+      ctx.fillStyle = color;
+      if(t.v >= 0){
+        ctx.fillRect(x, mid - barH, Math.max(barW-1,1), barH);
+      } else {
+        ctx.fillRect(x, mid, Math.max(barW-1,1), barH);
+      }
+    }
+
+    // center line
+    ctx.strokeStyle = "rgba(255,176,32,0.35)";
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(0,mid); ctx.lineTo(w,mid); ctx.stroke();
+  }
+
+  var idleCounter = 0;
+  function seismoLoop(){
+    idleCounter++;
+    if(idleCounter % 3 === 0) idleTick(); // ambient noise trickle
+    drawSeismo();
+    requestAnimationFrame(seismoLoop);
+  }
+  resizeCanvas();
+  requestAnimationFrame(seismoLoop);
+
+  /* ---------------- status ---------------- */
+  function setStatus(live){
+    isLive = live;
+    var dot = document.getElementById("statusDot");
+    var label = document.getElementById("statusLabel");
+    var banner = document.getElementById("demoBanner");
+    if(live){
+      dot.className = "dot live";
+      label.textContent = "LIVE";
+      banner.classList.remove("show");
+    } else {
+      dot.className = "dot demo";
+      label.textContent = "DEMO DATA";
+      banner.classList.add("show");
+    }
+  }
+  function touchUpdated(){
+    document.getElementById("lastUpdated").textContent =
+      new Date().toLocaleTimeString([], {hour:"2-digit", minute:"2-digit", second:"2-digit"});
+  }
+
+  /* ---------------- rendering ---------------- */
+  function renderWhale(trade, isNew){
+    var body = document.getElementById("whaleBody");
+    if(body.querySelector(".empty")) body.innerHTML = "";
+    var row = el("div", "row");
+    var side = (trade.side === "B" || trade.side === "buy") ? "buy" : "sell";
+    row.innerHTML =
+      '<span class="side-badge ' + side + '">' + (side === "buy" ? "BUY" : "SELL") + '</span>' +
+      '<span class="row-mid"><span class="coin">' + trade.coin + '</span>' +
+        '<div class="addr">' + shortAddr(side === "buy" ? trade.buyer_address : trade.seller_address) + '</div></span>' +
+      '<span class="row-right"><span class="notional">' + fmtUSD(trade.notional_usd) + '</span>' +
+        '<div class="ago">' + timeAgo(trade.timestamp) + '</div></span>';
+    body.insertBefore(row, body.firstChild);
+    while(body.children.length > 40) body.removeChild(body.lastChild);
+
+    if(isNew){
+      var v = Math.min(1, Math.max(0.15, trade.notional_usd / 2000000));
+      pushTrace(side === "buy" ? v : -v, side === "buy" ? "up" : "down");
+    }
+  }
+
+  function renderLiq(liq, isNew){
+    var body = document.getElementById("liqBody");
+    if(body.querySelector(".empty")) body.innerHTML = "";
+    var row = el("div", "row");
+    row.innerHTML =
+      '<span class="side-badge liq">LIQ</span>' +
+      '<span class="row-mid"><span class="coin">' + liq.coin + '</span>' +
+        '<div class="addr">' + shortAddr(liq.liquidated_user) + '</div></span>' +
+      '<span class="row-right"><span class="notional" style="color:var(--down)">' + fmtUSD(liq.notional) + '</span>' +
+        '<div class="ago">' + timeAgo(liq.time) + '</div></span>';
+    body.insertBefore(row, body.firstChild);
+    while(body.children.length > 40) body.removeChild(body.lastChild);
+
+    if(isNew){
+      var v = Math.min(1, Math.max(0.3, liq.notional / 1000000));
+      pushTrace(-v, "down");
+    }
+  }
+
+  function renderMarkets(rows){
+    var body = document.getElementById("marketBody");
+    body.innerHTML = "";
+    if(!rows.length){ body.appendChild(el("div","empty","no market data")); return; }
+    rows.forEach(function(m){
+      var chg = 0;
+      if(m.prev_day_px && Number(m.prev_day_px) !== 0){
+        chg = ((Number(m.mark_px) - Number(m.prev_day_px)) / Number(m.prev_day_px)) * 100;
+      }
+      var row = el("div", "mkt-row");
+      var chgColor = chg >= 0 ? "var(--up)" : "var(--down)";
+      var fundPct = (Number(m.funding) * 100).toFixed(4) + "%";
+      row.innerHTML =
+        '<span><span class="mkt-coin">' + m.coin + '</span>' +
+          '<div class="mkt-vol">' + fmtUSD(m.day_ntl_vlm) + ' vol</div></span>' +
+        '<span class="mkt-px">$' + fmtPx(m.mark_px) +
+          '<div style="font-size:10.5px;color:' + chgColor + '">' + (chg>=0?"+":"") + chg.toFixed(2) + '%</div></span>' +
+        '<span class="mkt-fund" style="color:var(--text-dim)">fund<br>' + fundPct + '</span>';
+      body.appendChild(row);
+    });
+  }
+
+  function renderStats(overviewRow, biggestUsd){
+    if(overviewRow){
+      document.getElementById("statVolume").textContent = fmtUSD(overviewRow.total_volume_usd);
+      document.getElementById("statLiqVol").textContent = fmtUSD(overviewRow.liquidation_volume_usd);
+      document.getElementById("statTraders").textContent = Number(overviewRow.active_traders || 0).toLocaleString();
+    }
+    if(biggestUsd !== undefined){
+      document.getElementById("statBiggest").textContent = fmtUSD(biggestUsd);
+    }
+  }
+
+  /* ---------------- live data via /api/sql ---------------- */
+  var biggestSeen = 0;
+
+  function fetchPreset(preset){
+    return fetch("/api/sql", {
+      method: "POST",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({preset: preset})
+    }).then(function(r){ return r.json(); });
+  }
+
+  function pollWhales(){
+    fetchPreset("whale_trades").then(function(json){
+      if(json.demo){ setStatus(false); return; }
+      setStatus(true); touchUpdated();
+      var rows = (json.data && (json.data.rows || json.data.data || json.data)) || [];
+      if(!Array.isArray(rows)) return;
+      rows.slice(0, 12).reverse().forEach(function(t){
+        var id = t.coin + t.timestamp + t.notional_usd;
+        var isNew = !whaleIds.has(id);
+        whaleIds.add(id);
+        if(isNew){
+          renderWhale(t, true);
+          if(t.notional_usd > biggestSeen){ biggestSeen = t.notional_usd; renderStats(null, biggestSeen); }
+        }
+      });
+    }).catch(function(){ setStatus(false); });
+  }
+
+  function pollLiqs(){
+    fetchPreset("liquidations").then(function(json){
+      if(json.demo){ setStatus(false); return; }
+      var rows = (json.data && (json.data.rows || json.data.data || json.data)) || [];
+      if(!Array.isArray(rows)) return;
+      rows.slice(0, 12).reverse().forEach(function(l){
+        var id = l.coin + l.time + l.notional;
+        var isNew = !liqIds.has(id);
+        liqIds.add(id);
+        if(isNew) renderLiq(l, true);
+      });
+    }).catch(function(){});
+  }
+
+  function pollMarkets(){
+    fetchPreset("market_context").then(function(json){
+      if(json.demo) return;
+      var rows = (json.data && (json.data.rows || json.data.data || json.data)) || [];
+      if(Array.isArray(rows) && rows.length) renderMarkets(rows);
+    }).catch(function(){});
+  }
+
+  function pollOverview(){
+    fetchPreset("overview").then(function(json){
+      if(json.demo){ setStatus(false); return; }
+      var rows = (json.data && (json.data.rows || json.data.data || json.data)) || [];
+      if(Array.isArray(rows) && rows.length) renderStats(rows[0]);
+    }).catch(function(){});
+  }
+
+  /* ---------------- demo data generator (used when no API key is set) ---------------- */
+  var DEMO_COINS = [
+    {c:"BTC",  px:112400}, {c:"ETH", px:4180}, {c:"SOL", px:186},
+    {c:"HYPE", px:38.4},   {c:"PURR", px:0.281}, {c:"kPEPE", px:0.0182},
+    {c:"WIF", px:1.94},    {c:"DOGE", px:0.241}, {c:"ARB", px:0.91}
+  ];
+  var demoAddrPool = [];
+  for(var a=0; a<24; a++){
+    demoAddrPool.push("0x" + Array.from({length:40}, function(){
+      return "0123456789abcdef"[Math.floor(Math.random()*16)];
+    }).join(""));
+  }
+  function rand(min,max){ return Math.random()*(max-min)+min; }
+  function pick(arr){ return arr[Math.floor(Math.random()*arr.length)]; }
+
+  function demoWhale(){
+    var m = pick(DEMO_COINS);
+    var side = Math.random() > 0.5 ? "B" : "S";
+    var notional = rand(50000, 1800000);
+    var trade = {
+      coin: m.c, side: side, timestamp: new Date().toISOString(),
+      notional_usd: notional,
+      buyer_address: pick(demoAddrPool), seller_address: pick(demoAddrPool)
+    };
+    renderWhale(trade, true);
+    if(notional > biggestSeen){ biggestSeen = notional; renderStats(null, biggestSeen); }
+  }
+  function demoLiq(){
+    var m = pick(DEMO_COINS);
+    var notional = rand(20000, 900000);
+    var liq = {
+      coin: m.c, time: new Date().toISOString(),
+      notional: notional, liquidated_user: pick(demoAddrPool)
+    };
+    renderLiq(liq, true);
+  }
+  function demoMarkets(){
+    var rows = DEMO_COINS.map(function(m){
+      var drift = 1 + rand(-0.06, 0.06);
+      return {
+        coin: m.c, mark_px: m.px * (1 + rand(-0.004,0.004)),
+        prev_day_px: m.px / drift,
+        funding: rand(-0.0002, 0.0004),
+        day_ntl_vlm: rand(4e6, 4.2e8)
+      };
+    }).sort(function(x,y){ return y.day_ntl_vlm - x.day_ntl_vlm; });
+    renderMarkets(rows);
+  }
+  function demoOverview(){
+    renderStats({
+      total_volume_usd: rand(1.6e9, 3.1e9),
+      liquidation_volume_usd: rand(8e6, 6.4e7),
+      active_traders: Math.floor(rand(9000, 15000))
+    });
+  }
+
+  var demoInterval = null;
+  function startDemo(){
+    if(demoInterval) return;
+    demoMarkets(); demoOverview();
+    for(var i=0;i<6;i++) setTimeout(demoWhale, i*280);
+    for(var j=0;j<3;j++) setTimeout(demoLiq, j*650 + 400);
+    demoInterval = setInterval(function(){
+      if(isLive){ clearInterval(demoInterval); demoInterval = null; return; }
+      touchUpdated();
+      if(Math.random() > 0.35) demoWhale();
+      if(Math.random() > 0.65) demoLiq();
+      if(Math.random() > 0.7) demoMarkets();
+    }, 2600);
+  }
+
+  /* ---------------- boot ---------------- */
+  function boot(){
+    pollOverview();
+    pollMarkets();
+    pollWhales();
+    pollLiqs();
+
+    setInterval(pollWhales, 20000);
+    setInterval(pollLiqs, 22000);
+    setInterval(pollMarkets, 30000);
+    setInterval(pollOverview, 60000);
+
+    // Give the live check a moment; if still not live, fall back to demo.
+    setTimeout(function(){ if(!isLive) startDemo(); }, 1500);
+  }
+  boot();
+
+})();
+</script>
+</body>
+</html>

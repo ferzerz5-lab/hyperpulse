@@ -498,12 +498,36 @@
     }).then(function(r){ return r.json(); });
   }
 
+  // QuickNode SQL Explorer returns a ClickHouse-shaped payload:
+  // { meta: [{name,type}...], data: [...rows...], rows: <count number> }
+  // "rows" there is a COUNT, not the array — pull from "data" first.
+  // Rows may come back as objects ({coin:"BTC",...}) or as plain arrays in
+  // column order — if it's the latter, use "meta" to turn them into objects.
+  function extractRows(json){
+    var d = json && json.data;
+    if(!d) return [];
+    var meta = Array.isArray(d.meta) ? d.meta : null;
+    var rows = Array.isArray(d.data) ? d.data
+      : Array.isArray(d.rows) ? d.rows
+      : Array.isArray(d) ? d
+      : [];
+    if(!rows.length) return [];
+    if(meta && Array.isArray(rows[0])){
+      rows = rows.map(function(r){
+        var obj = {};
+        meta.forEach(function(col, i){ obj[col.name] = r[i]; });
+        return obj;
+      });
+    }
+    return rows;
+  }
+
   function pollWhales(){
     fetchPreset("whale_trades").then(function(json){
       if(json.demo){ setStatus(false); return; }
       setStatus(true); touchUpdated();
-      var rows = (json.data && (json.data.rows || json.data.data || json.data)) || [];
-      if(!Array.isArray(rows)) return;
+      var rows = extractRows(json);
+      if(!rows.length) return;
       rows.slice(0, 12).reverse().forEach(function(t){
         var id = t.coin + t.timestamp + t.notional_usd;
         var isNew = !whaleIds.has(id);
@@ -519,8 +543,8 @@
   function pollLiqs(){
     fetchPreset("liquidations").then(function(json){
       if(json.demo){ setStatus(false); return; }
-      var rows = (json.data && (json.data.rows || json.data.data || json.data)) || [];
-      if(!Array.isArray(rows)) return;
+      var rows = extractRows(json);
+      if(!rows.length) return;
       rows.slice(0, 12).reverse().forEach(function(l){
         var id = l.coin + l.time + l.notional;
         var isNew = !liqIds.has(id);
@@ -533,16 +557,16 @@
   function pollMarkets(){
     fetchPreset("market_context").then(function(json){
       if(json.demo) return;
-      var rows = (json.data && (json.data.rows || json.data.data || json.data)) || [];
-      if(Array.isArray(rows) && rows.length) renderMarkets(rows);
+      var rows = extractRows(json);
+      if(rows.length) renderMarkets(rows);
     }).catch(function(){});
   }
 
   function pollOverview(){
     fetchPreset("overview").then(function(json){
       if(json.demo){ setStatus(false); return; }
-      var rows = (json.data && (json.data.rows || json.data.data || json.data)) || [];
-      if(Array.isArray(rows) && rows.length) renderStats(rows[0]);
+      var rows = extractRows(json);
+      if(rows.length) renderStats(rows[0]);
     }).catch(function(){});
   }
 

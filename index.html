@@ -280,6 +280,13 @@
     <span><a href="https://www.quicknode.com/docs/sql-explorer" target="_blank" rel="noopener">Quicknode SQL Explorer docs</a></span>
   </footer>
 
+  <div id="debugPanel" style="display:none; margin-top:18px; border:1px solid var(--border); border-radius:10px; background:var(--panel-2); padding:14px;">
+    <div style="font-family:var(--mono); font-size:10.5px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.08em; margin-bottom:8px;">
+      Debug — raw responses per preset (visit ?debug=1 to see this)
+    </div>
+    <pre id="debugOutput" style="font-family:var(--mono); font-size:11px; color:var(--text-dim); white-space:pre-wrap; word-break:break-all; max-height:500px; overflow:auto; margin:0;">waiting for first responses…</pre>
+  </div>
+
 </div>
 
 <script>
@@ -419,9 +426,11 @@
     var body = document.getElementById("whaleBody");
     if(body.querySelector(".empty")) body.innerHTML = "";
     var row = el("div", "row");
-    var side = (trade.side === "B" || trade.side === "buy") ? "buy" : "sell";
+    var side = normalizeSide(trade.side);
+    var badgeClass = side === "buy" ? "buy" : "sell";
+    var badgeText = side === "buy" ? "BUY" : (side === "sell" ? "SELL" : side.toUpperCase().slice(0,4));
     row.innerHTML =
-      '<span class="side-badge ' + side + '">' + (side === "buy" ? "BUY" : "SELL") + '</span>' +
+      '<span class="side-badge ' + badgeClass + '">' + badgeText + '</span>' +
       '<span class="row-mid"><span class="coin">' + trade.coin + '</span>' +
         '<div class="addr">' + shortAddr(side === "buy" ? trade.buyer_address : trade.seller_address) + '</div></span>' +
       '<span class="row-right"><span class="notional">' + fmtUSD(trade.notional_usd) + '</span>' +
@@ -490,12 +499,45 @@
   /* ---------------- live data via /api/sql ---------------- */
   var biggestSeen = 0;
 
+  var debugMode = window.location.search.indexOf("debug=1") !== -1;
+  var lastResponses = {};
+  if(debugMode) document.getElementById("debugPanel").style.display = "block";
+
+  function renderDebug(preset, json){
+    if(!debugMode) return;
+    lastResponses[preset] = json;
+    var out = document.getElementById("debugOutput");
+    var text = "";
+    Object.keys(lastResponses).forEach(function(p){
+      text += "=== " + p + " ===\n";
+      var raw = JSON.stringify(lastResponses[p], null, 2);
+      text += (raw.length > 3000 ? raw.slice(0, 3000) + "\n…(truncated)" : raw) + "\n\n";
+    });
+    out.textContent = text;
+  }
+
   function fetchPreset(preset){
     return fetch("/api/sql", {
       method: "POST",
       headers: {"Content-Type":"application/json"},
       body: JSON.stringify({preset: preset})
-    }).then(function(r){ return r.json(); });
+    }).then(function(r){ return r.json(); }).then(function(json){
+      renderDebug(preset, json);
+      return json;
+    }).catch(function(err){
+      renderDebug(preset, {fetchError: String(err && err.message ? err.message : err)});
+      throw err;
+    });
+  }
+
+  // Normalize whatever the "side" field actually contains into buy/sell,
+  // without silently guessing — unrecognized values pass through as-is so
+  // they're visible instead of being hidden behind a wrong default.
+  function normalizeSide(raw){
+    var s = String(raw == null ? "" : raw).trim().toLowerCase();
+    if(["b","buy","bid","long"].indexOf(s) > -1) return "buy";
+    if(["s","sell","ask","short","a"].indexOf(s) > -1) return "sell";
+    return s || "sell";
   }
 
   // QuickNode SQL Explorer returns a ClickHouse-shaped payload:

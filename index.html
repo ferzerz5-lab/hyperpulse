@@ -600,7 +600,17 @@
     fetchPreset("market_context").then(function(json){
       if(json.demo) return;
       var rows = extractRows(json);
-      if(rows.length) renderMarkets(rows);
+      if(!rows.length) return;
+      // rows are the most recently-inserted records, not filtered by coin,
+      // so the same coin can appear multiple times — keep only the first
+      // (most recent) occurrence of each, then sort by volume.
+      var seen = {};
+      var deduped = [];
+      rows.forEach(function(r){
+        if(!seen[r.coin]){ seen[r.coin] = true; deduped.push(r); }
+      });
+      deduped.sort(function(a,b){ return Number(b.day_ntl_vlm) - Number(a.day_ntl_vlm); });
+      renderMarkets(deduped.slice(0, 12));
     }).catch(function(){});
   }
 

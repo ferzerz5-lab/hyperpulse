@@ -18,11 +18,13 @@ const PRESETS = {
   // Forced liquidation fills, most recent first.
   liquidations: `SELECT time, coin, side, price, size, toFloat64(price) * toFloat64(size) AS notional, liquidated_user, liquidation_mark_price FROM hyperliquid_fills WHERE block_time > now() - INTERVAL 24 HOUR AND is_liquidation = 1 ORDER BY block_number DESC, tid DESC LIMIT 40`,
 
-  // TEMP DIAGNOSTIC — bare read, no WHERE, no ORDER BY, no GROUP BY.
-  // If even this times out, the issue isn't our query shape at all — it's
-  // this specific table/cluster being slow or oversized, worth asking
-  // Quicknode about directly rather than guessing further.
-  market_context: `SELECT coin, mark_px, funding, open_interest, oracle_px, prev_day_px, day_ntl_vlm FROM hyperliquid_perpetual_market_contexts LIMIT 12`,
+  // Latest snapshot of funding / open interest / price per market, sorted by 24h volume.
+  // This table responds slower than the others on Quicknode's side (confirmed
+  // with Sahil — a low LIMIT works, it just needs more time than our old 9s
+  // timeout allowed). Ordered by polled_at so we get the freshest data;
+  // pulling 60 rows and de-duplicating to one-per-coin client-side since the
+  // same coin can appear more than once across poll cycles.
+  market_context: `SELECT coin, funding, open_interest, mark_px, oracle_px, prev_day_px, day_ntl_vlm, polled_at FROM hyperliquid_perpetual_market_contexts ORDER BY polled_at DESC LIMIT 60`,
 
   // Platform-wide daily rollup — today vs yesterday, for the header stat row.
   overview: `SELECT day, total_volume_usd, total_fills, active_traders, liquidation_count, liquidation_volume_usd FROM hyperliquid_metrics_overview ORDER BY day DESC LIMIT 2`,
@@ -62,7 +64,7 @@ module.exports = async function handler(req, res) {
 
   try {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 9000); // stay under Vercel Hobby's ~10s function limit
+    const timeout = setTimeout(() => controller.abort(), 25000); // market_context responds slower than the other tables — give it real room instead of cutting it off
 
     const upstream = await fetch(ENDPOINT, {
       method: "POST",
@@ -88,3 +90,8 @@ module.exports = async function handler(req, res) {
     res.status(502).json({ error: "Upstream request failed", detail: String(err && err.message ? err.message : err) });
   }
 };
+
+// Without this, Vercel's default ~10s function timeout can kill the request
+// before our own 25s AbortController timeout ever gets a chance to fire —
+// which is exactly what was happening on the slower market_context table.
+module.exports.config = { maxDuration: 30 };

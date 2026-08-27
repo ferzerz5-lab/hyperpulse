@@ -19,7 +19,9 @@ const PRESETS = {
   liquidations: `SELECT time, coin, side, price, size, toFloat64(price) * toFloat64(size) AS notional, liquidated_user, liquidation_mark_price FROM hyperliquid_fills WHERE block_time > now() - INTERVAL 24 HOUR AND is_liquidation = 1 ORDER BY block_number DESC, tid DESC LIMIT 40`,
 
   // Latest snapshot of funding / open interest / price per market, sorted by 24h volume.
-  market_context: `SELECT coin, funding, open_interest, mark_px, oracle_px, prev_day_px, day_ntl_vlm FROM hyperliquid_perpetual_market_contexts WHERE polled_at > now() - INTERVAL 5 MINUTE ORDER BY toFloat64(day_ntl_vlm) DESC LIMIT 12`,
+  // Widened to a 6h freshness window — some markets don't get a polled_at
+  // row inside every 5-minute tick, so a tight filter was returning zero rows.
+  market_context: `SELECT coin, funding, open_interest, mark_px, oracle_px, prev_day_px, day_ntl_vlm FROM hyperliquid_perpetual_market_contexts WHERE polled_at > now() - INTERVAL 6 HOUR ORDER BY toFloat64(day_ntl_vlm) DESC LIMIT 12`,
 
   // Platform-wide daily rollup — today vs yesterday, for the header stat row.
   overview: `SELECT day, total_volume_usd, total_fills, active_traders, liquidation_count, liquidation_volume_usd FROM hyperliquid_metrics_overview ORDER BY day DESC LIMIT 2`,

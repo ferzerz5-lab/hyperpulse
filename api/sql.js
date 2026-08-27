@@ -18,14 +18,11 @@ const PRESETS = {
   // Forced liquidation fills, most recent first.
   liquidations: `SELECT time, coin, side, price, size, toFloat64(price) * toFloat64(size) AS notional, liquidated_user, liquidation_mark_price FROM hyperliquid_fills WHERE block_time > now() - INTERVAL 24 HOUR AND is_liquidation = 1 ORDER BY block_number DESC, tid DESC LIMIT 40`,
 
-  // Latest snapshot of funding / open interest / price per market, sorted by 24h volume.
-  // Filtering or grouping on polled_at kept timing out regardless of window
-  // size (5m, 6h, 24h, 2h all failed) — that pattern points to polled_at
-  // not being scan-friendly on this table. Instead, just pull the most
-  // recently-inserted rows with no WHERE/GROUP BY at all (fast, since it's
-  // effectively reading the tail of the table) and de-duplicate to one row
-  // per coin client-side.
-  market_context: `SELECT coin, funding, open_interest, mark_px, oracle_px, prev_day_px, day_ntl_vlm, polled_at FROM hyperliquid_perpetual_market_contexts ORDER BY polled_at DESC LIMIT 60`,
+  // TEMP DIAGNOSTIC — bare read, no WHERE, no ORDER BY, no GROUP BY.
+  // If even this times out, the issue isn't our query shape at all — it's
+  // this specific table/cluster being slow or oversized, worth asking
+  // Quicknode about directly rather than guessing further.
+  market_context: `SELECT coin, mark_px, funding, open_interest, oracle_px, prev_day_px, day_ntl_vlm FROM hyperliquid_perpetual_market_contexts LIMIT 12`,
 
   // Platform-wide daily rollup — today vs yesterday, for the header stat row.
   overview: `SELECT day, total_volume_usd, total_fills, active_traders, liquidation_count, liquidation_volume_usd FROM hyperliquid_metrics_overview ORDER BY day DESC LIMIT 2`,

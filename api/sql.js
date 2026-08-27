@@ -19,11 +19,13 @@ const PRESETS = {
   liquidations: `SELECT time, coin, side, price, size, toFloat64(price) * toFloat64(size) AS notional, liquidated_user, liquidation_mark_price FROM hyperliquid_fills WHERE block_time > now() - INTERVAL 24 HOUR AND is_liquidation = 1 ORDER BY block_number DESC, tid DESC LIMIT 40`,
 
   // Latest snapshot of funding / open interest / price per market, sorted by 24h volume.
-  // Uses argMax to get the most-recent row per coin. Windowed to 2h instead
-  // of 24h — this table is polled frequently, so scanning a full day timed
-  // out; markets update far more often than every 2h so this stays fast
-  // while still catching every active market.
-  market_context: `SELECT coin, argMax(funding, polled_at) AS funding, argMax(open_interest, polled_at) AS open_interest, argMax(mark_px, polled_at) AS mark_px, argMax(oracle_px, polled_at) AS oracle_px, argMax(prev_day_px, polled_at) AS prev_day_px, argMax(day_ntl_vlm, polled_at) AS day_ntl_vlm FROM hyperliquid_perpetual_market_contexts WHERE polled_at > now() - INTERVAL 2 HOUR GROUP BY coin ORDER BY toFloat64(day_ntl_vlm) DESC LIMIT 12`,
+  // Filtering or grouping on polled_at kept timing out regardless of window
+  // size (5m, 6h, 24h, 2h all failed) — that pattern points to polled_at
+  // not being scan-friendly on this table. Instead, just pull the most
+  // recently-inserted rows with no WHERE/GROUP BY at all (fast, since it's
+  // effectively reading the tail of the table) and de-duplicate to one row
+  // per coin client-side.
+  market_context: `SELECT coin, funding, open_interest, mark_px, oracle_px, prev_day_px, day_ntl_vlm, polled_at FROM hyperliquid_perpetual_market_contexts ORDER BY polled_at DESC LIMIT 60`,
 
   // Platform-wide daily rollup — today vs yesterday, for the header stat row.
   overview: `SELECT day, total_volume_usd, total_fills, active_traders, liquidation_count, liquidation_volume_usd FROM hyperliquid_metrics_overview ORDER BY day DESC LIMIT 2`,

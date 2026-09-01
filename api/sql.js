@@ -13,7 +13,11 @@ const ENDPOINT = "https://api.quicknode.com/sql/rest/v1/query";
 
 const PRESETS = {
   // Big single trades — the "whale" feed. $50k+ notional, last 6h, biggest first.
-  whale_trades: `SELECT timestamp, coin, side, price, size, toFloat64(price) * toFloat64(size) AS notional_usd, buyer_address, seller_address FROM hyperliquid_trades WHERE block_time > now() - INTERVAL 6 HOUR AND toFloat64(price) * toFloat64(size) > 50000 ORDER BY block_number DESC, trade_id DESC LIMIT 40`,
+  // Big single trades — the "whale" feed. $15k+ notional, last 6h, biggest first.
+  // Lowered from $50k after Sahil's feedback that the feed looked too quiet —
+  // $15k still means something on Hyperliquid, just fires often enough to
+  // feel alive rather than sitting empty between real whale-sized trades.
+  whale_trades: `SELECT timestamp, coin, side, price, size, toFloat64(price) * toFloat64(size) AS notional_usd, buyer_address, seller_address FROM hyperliquid_trades WHERE block_time > now() - INTERVAL 6 HOUR AND toFloat64(price) * toFloat64(size) > 15000 ORDER BY block_number DESC, trade_id DESC LIMIT 40`,
 
   // Forced liquidation fills, most recent first.
   liquidations: `SELECT time, coin, side, price, size, toFloat64(price) * toFloat64(size) AS notional, liquidated_user, liquidation_mark_price FROM hyperliquid_fills WHERE block_time > now() - INTERVAL 24 HOUR AND is_liquidation = 1 ORDER BY block_number DESC, tid DESC LIMIT 40`,

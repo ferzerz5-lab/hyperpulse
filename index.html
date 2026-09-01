@@ -334,8 +334,18 @@
     if(!a || typeof a !== "string") return "—";
     return a.slice(0,6) + "…" + a.slice(-4);
   }
+  // Quicknode timestamps come back as "2026-08-27 13:10:58.728" — no "T",
+  // no "Z", no offset. They ARE UTC, but JS's Date parser treats an
+  // unmarked string like that as local time, which silently shifts every
+  // timestamp by the viewer's timezone offset. Force it to be read as UTC.
+  function parseUtc(ts){
+    if(typeof ts === "string" && ts.indexOf("T") === -1 && ts.slice(-1) !== "Z"){
+      ts = ts.replace(" ", "T") + "Z";
+    }
+    return new Date(ts);
+  }
   function timeAgo(ts){
-    var t = new Date(ts).getTime();
+    var t = parseUtc(ts).getTime();
     if(isNaN(t)) return "";
     var s = Math.max(0, Math.floor((Date.now() - t)/1000));
     if(s < 60) return s + "s ago";

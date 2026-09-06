@@ -267,7 +267,7 @@
     <div class="panel">
       <div class="panel-head">
         <div class="panel-title"><span class="sw" style="background:var(--up)"></span>Whale trades</div>
-        <div class="panel-sub">notional &gt; $15K</div>
+        <div class="panel-sub" id="whaleSourceTag">notional &gt; $15K</div>
       </div>
       <div class="panel-body" id="whaleBody">
         <div class="empty">waiting for first trade…</div>
@@ -277,7 +277,7 @@
     <div class="panel">
       <div class="panel-head">
         <div class="panel-title"><span class="sw" style="background:var(--down)"></span>Liquidations</div>
-        <div class="panel-sub">last 24h</div>
+        <div class="panel-sub" id="liqSourceTag">last 24h</div>
       </div>
       <div class="panel-body" id="liqBody">
         <div class="empty">waiting for first liquidation…</div>
@@ -362,6 +362,18 @@
   var isLive = false;
   var whaleIds = new Set();
   var liqIds = new Set();
+
+  /* ---------------- gRPC relay (optional — real-time whale trades + liquidations) ----------------
+     Leave RELAY_WS_URL blank to keep using SQL Explorer polling for these
+     two panels (the original, fully working behavior). Fill it in once the
+     relay in /hyperpulse-relay is deployed (see its README) to switch to
+     genuine sub-second gRPC-pushed data instead of 20s polling. */
+  var RELAY_WS_URL = "wss://hyperpulse-relay-production.up.railway.app"; // e.g. "wss://hyperpulse-relay-production.up.railway.app"
+  var whalePollTimer = null;
+  var liqPollTimer = null;
+  var relaySocket = null;
+  var relayActive = false;
+  var relayRetryDelay = 2000;
 
   /* ---------------- seismograph ---------------- */
   var canvas = document.getElementById("seismo");
@@ -744,6 +756,73 @@
     }, 2600);
   }
 
+  /* ---------------- gRPC relay client ---------------- */
+  function setSourceTags(viaRelay){
+    var w = document.getElementById("whaleSourceTag");
+    var l = document.getElementById("liqSourceTag");
+    if(w) w.textContent = "notional > $15K" + (viaRelay ? " · gRPC live" : "");
+    if(l) l.textContent = "last 24h" + (viaRelay ? " · gRPC live" : "");
+  }
+
+  // The relay sends one flat object per event: {type, coin, side, price,
+  // size, notional, address, time, liquidation}. It only knows one side of
+  // each fill (not a matched buyer+seller pair like the old SQL Explorer
+  // view), so both address fields below just point at the same address —
+  // renderWhale/renderLiq only ever read whichever one matches the side.
+  function adaptRelayWhale(msg){
+    return {
+      coin: msg.coin, side: msg.side, timestamp: msg.time,
+      notional_usd: msg.notional,
+      buyer_address: msg.address, seller_address: msg.address
+    };
+  }
+  function adaptRelayLiq(msg){
+    return { coin: msg.coin, time: msg.time, notional: msg.notional, liquidated_user: msg.address };
+  }
+
+  function fallBackToPolling(){
+    if(!relayActive) return; // already on polling, nothing to undo
+    relayActive = false;
+    setSourceTags(false);
+    if(!whalePollTimer) whalePollTimer = setInterval(pollWhales, 20000);
+    if(!liqPollTimer) liqPollTimer = setInterval(pollLiqs, 22000);
+  }
+
+  function connectRelay(){
+    if(!RELAY_WS_URL) return;
+    try {
+      relaySocket = new WebSocket(RELAY_WS_URL);
+    } catch(e){
+      return; // malformed URL — just stay on polling rather than throw
+    }
+
+    relaySocket.onopen = function(){
+      relayActive = true;
+      relayRetryDelay = 2000;
+      setSourceTags(true);
+      setStatus(true); touchUpdated();
+      if(whalePollTimer){ clearInterval(whalePollTimer); whalePollTimer = null; }
+      if(liqPollTimer){ clearInterval(liqPollTimer); liqPollTimer = null; }
+    };
+
+    relaySocket.onmessage = function(evt){
+      var msg;
+      try { msg = JSON.parse(evt.data); } catch(e){ return; }
+      touchUpdated();
+      if(msg.type === "whale") renderWhale(adaptRelayWhale(msg), true);
+      else if(msg.type === "liquidation") renderLiq(adaptRelayLiq(msg), true);
+    };
+
+    relaySocket.onclose = function(){
+      fallBackToPolling();
+      relayRetryDelay = Math.min(relayRetryDelay * 2, 30000);
+      setTimeout(connectRelay, relayRetryDelay);
+    };
+    relaySocket.onerror = function(){
+      if(relaySocket) relaySocket.close();
+    };
+  }
+
   /* ---------------- boot ---------------- */
   function boot(){
     pollOverview();
@@ -751,8 +830,13 @@
     pollWhales();
     pollLiqs();
 
-    setInterval(pollWhales, 20000);
-    setInterval(pollLiqs, 22000);
+    if(RELAY_WS_URL){
+      connectRelay(); // takes over from polling once it opens
+    } else {
+      whalePollTimer = setInterval(pollWhales, 20000);
+      liqPollTimer = setInterval(pollLiqs, 22000);
+    }
+
     setInterval(pollMarkets, 30000);
     setInterval(pollOverview, 60000);
 

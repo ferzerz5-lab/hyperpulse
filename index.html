@@ -216,7 +216,7 @@
       </div>
       <div>
         <h1>HyperPulse</h1>
-        <div class="tagline">whale trades &amp; liquidations on <b>Hyperliquid HyperCore</b> · via Quicknode SQL Explorer</div>
+        <div class="tagline">whale trades &amp; liquidations on <b>Hyperliquid HyperCore</b> · via Quicknode gRPC + SQL Explorer</div>
       </div>
     </div>
     <div class="status-block">
@@ -436,7 +436,12 @@
   var idleCounter = 0;
   function seismoLoop(){
     idleCounter++;
-    if(idleCounter % 3 === 0) idleTick(); // ambient noise trickle
+    // Idle-tick rate controls how fast the whole trace scrolls (buffer
+    // length ÷ this rate = seconds of history visible). Slowed from every
+    // 3 frames to every 24 once gRPC started delivering bursts of several
+    // trades within the same second — at the old speed, a real spike would
+    // scroll off-screen in ~11s, too fast to actually see.
+    if(idleCounter % 24 === 0) idleTick(); // ambient noise trickle
     drawSeismo();
     requestAnimationFrame(seismoLoop);
   }

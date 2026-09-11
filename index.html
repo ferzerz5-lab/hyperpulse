@@ -156,6 +156,14 @@
   .panel-title{ font-size:13.5px; font-weight:600; display:flex; align-items:center; gap:8px; }
   .panel-title .sw{ width:8px; height:8px; border-radius:2px; }
   .panel-sub{ font-family:var(--mono); font-size:10px; color:var(--text-dim2); }
+  .range-switcher{ display:flex; gap:4px; }
+  .range-btn{
+    font-family:var(--mono); font-size:10px; font-weight:600;
+    background:transparent; border:1px solid var(--border-lt); color:var(--text-dim);
+    border-radius:5px; padding:3px 8px; cursor:pointer; transition:all 0.15s;
+  }
+  .range-btn:hover{ color:var(--text); border-color:var(--text-dim); }
+  .range-btn.active{ background:rgba(255,176,32,0.12); border-color:var(--amber); color:var(--amber); }
   .panel-body{ overflow-y:auto; flex:1; }
   .panel-body::-webkit-scrollbar{ width:6px; }
   .panel-body::-webkit-scrollbar-thumb{ background:var(--border-lt); border-radius:4px; }
@@ -287,7 +295,11 @@
     <div class="panel">
       <div class="panel-head">
         <div class="panel-title"><span class="sw" style="background:var(--amber)"></span>Markets</div>
-        <div class="panel-sub">by 24h volume</div>
+        <div class="range-switcher" id="rangeSwitcher">
+          <button class="range-btn active" data-range="1h">1H</button>
+          <button class="range-btn" data-range="6h">6H</button>
+          <button class="range-btn" data-range="24h">24H</button>
+        </div>
       </div>
       <div class="panel-body" id="marketBody">
         <div class="empty">loading market context…</div>
@@ -655,6 +667,7 @@
 
   var marketsLoaded = false;
   var marketsFailStreak = 0;
+  var selectedMarketRange = "1h";
 
   // Don't leave the panel stuck on a generic "loading" message forever when
   // this specific query keeps timing out — say so honestly instead, but
@@ -672,7 +685,7 @@
   }
 
   function pollMarkets(){
-    fetchPreset("market_context").then(function(json){
+    fetchPreset("market_context_" + selectedMarketRange).then(function(json){
       if(json.demo) return;
       var rows = extractRows(json);
       if(!rows.length){ marketsFailureMessage(); return; }
@@ -690,6 +703,27 @@
       marketsFailStreak = 0;
     }).catch(function(){ marketsFailureMessage(); });
   }
+
+  // Range switcher — each button just changes which whitelisted preset
+  // pollMarkets asks for (market_context_1h / _6h / _24h). Switching ranges
+  // resets the "loaded" state so the panel honestly shows "loading" again
+  // for the new range instead of leaving the old range's data on screen
+  // looking like it belongs to the newly selected one.
+  document.getElementById("rangeSwitcher").addEventListener("click", function(evt){
+    var btn = evt.target.closest(".range-btn");
+    if(!btn) return;
+    var range = btn.getAttribute("data-range");
+    if(range === selectedMarketRange) return;
+    selectedMarketRange = range;
+    document.querySelectorAll(".range-btn").forEach(function(b){
+      b.classList.toggle("active", b === btn);
+    });
+    marketsLoaded = false;
+    marketsFailStreak = 0;
+    document.getElementById("marketBody").innerHTML = "";
+    document.getElementById("marketBody").appendChild(el("div", "empty", "loading market context…"));
+    pollMarkets();
+  });
 
   function pollOverview(){
     fetchPreset("overview").then(function(json){

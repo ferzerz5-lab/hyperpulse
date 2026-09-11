@@ -336,6 +336,17 @@
     if(n >= 1e3) return sign + "$" + (n/1e3).toFixed(1) + "K";
     return sign + "$" + n.toFixed(0);
   }
+  // Same compact K/M/B scaling as fmtUSD but no $ sign — for quantities
+  // that aren't dollar amounts, like open interest (a contract count).
+  function fmtNum(n){
+    n = Number(n) || 0;
+    var sign = n < 0 ? "-" : "";
+    n = Math.abs(n);
+    if(n >= 1e9) return sign + (n/1e9).toFixed(2) + "B";
+    if(n >= 1e6) return sign + (n/1e6).toFixed(2) + "M";
+    if(n >= 1e3) return sign + (n/1e3).toFixed(1) + "K";
+    return sign + n.toFixed(0);
+  }
   function fmtPx(n){
     n = Number(n) || 0;
     if(n >= 1000) return n.toFixed(1);
@@ -546,7 +557,7 @@
       var fundPct = (Number(m.funding) * 100).toFixed(4) + "%";
       row.innerHTML =
         '<span><span class="mkt-coin">' + m.coin + '</span>' +
-          '<div class="mkt-vol">' + fmtUSD(m.day_ntl_vlm) + ' vol</div></span>' +
+          '<div class="mkt-vol">' + fmtNum(m.open_interest) + ' OI</div></span>' +
         '<span class="mkt-px">$' + fmtPx(m.mark_px) +
           '<div style="font-size:10.5px;color:' + chgColor + '">' + (chg>=0?"+":"") + chg.toFixed(2) + '%</div></span>' +
         '<span class="mkt-fund" style="color:var(--text-dim)">fund<br>' + fundPct + '</span>';
@@ -697,7 +708,13 @@
       rows.forEach(function(r){
         if(!seen[r.coin]){ seen[r.coin] = true; deduped.push(r); }
       });
-      deduped.sort(function(a,b){ return Number(b.day_ntl_vlm) - Number(a.day_ntl_vlm); });
+      // Sorted by open_interest, not day_ntl_vlm — the volume field is
+      // coming back as 0 for every row in the current data (confirmed via
+      // ?debug=1, not a query bug), which made "by volume" ordering
+      // meaningless. open_interest is reliably populated with real,
+      // varying numbers, so that's what actually orders these sensibly
+      // until the volume field starts returning real data.
+      deduped.sort(function(a,b){ return Number(b.open_interest) - Number(a.open_interest); });
       renderMarkets(deduped.slice(0, 12));
       marketsLoaded = true;
       marketsFailStreak = 0;
@@ -776,9 +793,9 @@
         coin: m.c, mark_px: m.px * (1 + rand(-0.004,0.004)),
         prev_day_px: m.px / drift,
         funding: rand(-0.0002, 0.0004),
-        day_ntl_vlm: rand(4e6, 4.2e8)
+        open_interest: rand(5e5, 8e7) // matches the real field renderMarkets now displays/sorts by
       };
-    }).sort(function(x,y){ return y.day_ntl_vlm - x.day_ntl_vlm; });
+    }).sort(function(x,y){ return y.open_interest - x.open_interest; });
     renderMarkets(rows);
   }
   function demoOverview(){

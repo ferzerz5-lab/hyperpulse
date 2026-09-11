@@ -12,7 +12,6 @@ const CLUSTER_ID = "hyperliquid-core-mainnet";
 const ENDPOINT = "https://api.quicknode.com/sql/rest/v1/query";
 
 const PRESETS = {
-  // Big single trades — the "whale" feed. $50k+ notional, last 6h, biggest first.
   // Big single trades — the "whale" feed. $15k+ notional, last 6h, biggest first.
   // Lowered from $50k after Sahil's feedback that the feed looked too quiet —
   // $15k still means something on Hyperliquid, just fires often enough to
@@ -22,13 +21,16 @@ const PRESETS = {
   // Forced liquidation fills, most recent first.
   liquidations: `SELECT time, coin, side, price, size, toFloat64(price) * toFloat64(size) AS notional, liquidated_user, liquidation_mark_price FROM hyperliquid_fills WHERE block_time > now() - INTERVAL 24 HOUR AND is_liquidation = 1 ORDER BY block_number DESC, tid DESC LIMIT 40`,
 
-  // Latest snapshot of funding / open interest / price per market, sorted by 24h volume.
-  // This table responds slower than the others on Quicknode's side (confirmed
-  // with Sahil — a low LIMIT works, it just needs more time than our old 9s
-  // timeout allowed). Ordered by polled_at so we get the freshest data;
-  // pulling 60 rows and de-duplicating to one-per-coin client-side since the
-  // same coin can appear more than once across poll cycles.
-  market_context: `SELECT coin, funding, open_interest, mark_px, oracle_px, prev_day_px, day_ntl_vlm, polled_at FROM hyperliquid_perpetual_market_contexts ORDER BY polled_at DESC LIMIT 60`,
+  // Latest snapshot of funding / open interest / price per market.
+  // Three range options instead of one fixed query — Sahil's suggestion
+  // was to try a narrower window than the unfiltered version, since this
+  // table has been consistently slow. 1h is the default (fastest, most
+  // likely to actually finish); 6h/24h are opt-in via the range switcher
+  // in the UI, for whenever someone wants the fuller picture and is willing
+  // to wait a bit longer for it.
+  market_context_1h: `SELECT coin, funding, open_interest, mark_px, oracle_px, prev_day_px, day_ntl_vlm, polled_at FROM hyperliquid_perpetual_market_contexts WHERE polled_at > now() - INTERVAL 1 HOUR ORDER BY polled_at DESC LIMIT 60`,
+  market_context_6h: `SELECT coin, funding, open_interest, mark_px, oracle_px, prev_day_px, day_ntl_vlm, polled_at FROM hyperliquid_perpetual_market_contexts WHERE polled_at > now() - INTERVAL 6 HOUR ORDER BY polled_at DESC LIMIT 60`,
+  market_context_24h: `SELECT coin, funding, open_interest, mark_px, oracle_px, prev_day_px, day_ntl_vlm, polled_at FROM hyperliquid_perpetual_market_contexts WHERE polled_at > now() - INTERVAL 24 HOUR ORDER BY polled_at DESC LIMIT 60`,
 
   // Platform-wide daily rollup — today vs yesterday, for the header stat row.
   overview: `SELECT day, total_volume_usd, total_fills, active_traders, liquidation_count, liquidation_volume_usd FROM hyperliquid_metrics_overview ORDER BY day DESC LIMIT 2`,

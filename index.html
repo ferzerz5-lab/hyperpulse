@@ -156,14 +156,6 @@
   .panel-title{ font-size:13.5px; font-weight:600; display:flex; align-items:center; gap:8px; }
   .panel-title .sw{ width:8px; height:8px; border-radius:2px; }
   .panel-sub{ font-family:var(--mono); font-size:10px; color:var(--text-dim2); }
-  .range-switcher{ display:flex; gap:4px; }
-  .range-btn{
-    font-family:var(--mono); font-size:10px; font-weight:600;
-    background:transparent; border:1px solid var(--border-lt); color:var(--text-dim);
-    border-radius:5px; padding:3px 8px; cursor:pointer; transition:all 0.15s;
-  }
-  .range-btn:hover{ color:var(--text); border-color:var(--text-dim); }
-  .range-btn.active{ background:rgba(255,176,32,0.12); border-color:var(--amber); color:var(--amber); }
   .panel-body{ overflow-y:auto; flex:1; }
   .panel-body::-webkit-scrollbar{ width:6px; }
   .panel-body::-webkit-scrollbar-thumb{ background:var(--border-lt); border-radius:4px; }
@@ -311,11 +303,7 @@
     <div class="panel">
       <div class="panel-head">
         <div class="panel-title"><span class="sw" style="background:var(--amber)"></span>Markets</div>
-        <div class="range-switcher" id="rangeSwitcher">
-          <button class="range-btn active" data-range="1h">1H</button>
-          <button class="range-btn" data-range="6h">6H</button>
-          <button class="range-btn" data-range="24h">24H</button>
-        </div>
+        <div class="panel-sub">live · all markets</div>
       </div>
       <div class="panel-body" id="marketBody">
         <div class="empty">loading market context…</div>
@@ -712,69 +700,67 @@
 
   var marketsLoaded = false;
   var marketsFailStreak = 0;
-  var selectedMarketRange = "1h";
 
-  // Don't leave the panel stuck on a generic "loading" message forever when
-  // this specific query keeps timing out — say so honestly instead, but
-  // only while we've never successfully loaded real data (never overwrite
-  // good data just because one poll failed).
+  // Don't leave the panel stuck on a generic "loading" message forever if
+  // something goes wrong — say so honestly instead, but only while we've
+  // never successfully loaded real data (never overwrite good data just
+  // because one poll failed).
   function marketsFailureMessage(){
     if(marketsLoaded) return;
     marketsFailStreak++;
     var body = document.getElementById("marketBody");
     var msg = marketsFailStreak >= 2
-      ? "market data is a known slow query on this cluster, still retrying every 30s"
+      ? "market data isn't coming through right now, still retrying every 30s"
       : "loading market context…";
     body.innerHTML = "";
     body.appendChild(el("div", "empty", msg));
   }
 
+  // Markets now comes from /api/markets (Hyperliquid's metaAndAssetCtxs
+  // info method) instead of the old SQL Explorer table. Response shape is
+  // [meta, assetCtxs] — meta.universe[i] and assetCtxs[i] are the same
+  // index into the same list of markets, so they're zipped together here.
   function pollMarkets(){
-    fetchPreset("market_context_" + selectedMarketRange).then(function(json){
-      if(json.demo) return;
-      var rows = extractRows(json);
-      if(!rows.length){ marketsFailureMessage(); return; }
-      // rows are the most recently-inserted records, not filtered by coin,
-      // so the same coin can appear multiple times — keep only the first
-      // (most recent) occurrence of each, then sort by volume.
-      var seen = {};
-      var deduped = [];
-      rows.forEach(function(r){
-        if(!seen[r.coin]){ seen[r.coin] = true; deduped.push(r); }
-      });
-      // Sorted by open_interest, not day_ntl_vlm — the volume field is
-      // coming back as 0 for every row in the current data (confirmed via
-      // ?debug=1, not a query bug), which made "by volume" ordering
-      // meaningless. open_interest is reliably populated with real,
-      // varying numbers, so that's what actually orders these sensibly
-      // until the volume field starts returning real data.
-      deduped.sort(function(a,b){ return Number(b.open_interest) - Number(a.open_interest); });
-      renderMarkets(deduped.slice(0, 12));
-      marketsLoaded = true;
-      marketsFailStreak = 0;
-    }).catch(function(){ marketsFailureMessage(); });
-  }
+    fetch("/api/markets", { method: "POST", headers: {"Content-Type":"application/json"} })
+      .then(function(r){ return r.json(); })
+      .then(function(json){
+        renderDebug("markets", json);
+        if(json.demo) return; // QN_INFO_URL not set yet — demo mode covers this panel too
+        if(!json.data || !Array.isArray(json.data) || json.data.length < 2){ marketsFailureMessage(); return; }
 
-  // Range switcher — each button just changes which whitelisted preset
-  // pollMarkets asks for (market_context_1h / _6h / _24h). Switching ranges
-  // resets the "loaded" state so the panel honestly shows "loading" again
-  // for the new range instead of leaving the old range's data on screen
-  // looking like it belongs to the newly selected one.
-  document.getElementById("rangeSwitcher").addEventListener("click", function(evt){
-    var btn = evt.target.closest(".range-btn");
-    if(!btn) return;
-    var range = btn.getAttribute("data-range");
-    if(range === selectedMarketRange) return;
-    selectedMarketRange = range;
-    document.querySelectorAll(".range-btn").forEach(function(b){
-      b.classList.toggle("active", b === btn);
-    });
-    marketsLoaded = false;
-    marketsFailStreak = 0;
-    document.getElementById("marketBody").innerHTML = "";
-    document.getElementById("marketBody").appendChild(el("div", "empty", "loading market context…"));
-    pollMarkets();
-  });
+        var meta = json.data[0];
+        var assetCtxs = json.data[1];
+        var universe = (meta && meta.universe) || [];
+        if(!universe.length){ marketsFailureMessage(); return; }
+
+        var rows = universe.map(function(u, i){
+          var ctx = assetCtxs[i] || {};
+          return {
+            coin: u.name,
+            funding: ctx.funding,
+            open_interest: ctx.openInterest,
+            mark_px: ctx.markPx,
+            oracle_px: ctx.oraclePx,
+            prev_day_px: ctx.prevDayPx,
+            day_ntl_vlm: ctx.dayNtlVlm
+          };
+        });
+
+        // Prefer sorting by actual volume — but the SQL Explorer table
+        // taught us that a volume field can silently come back as 0 across
+        // every row. Same defensive check here: if that happens again on
+        // this data source too, fall back to open_interest automatically
+        // instead of shipping a meaningless sort order a second time.
+        var allVolZero = rows.every(function(r){ return !r.day_ntl_vlm || Number(r.day_ntl_vlm) === 0; });
+        var sortKey = allVolZero ? "open_interest" : "day_ntl_vlm";
+        rows.sort(function(a,b){ return Number(b[sortKey]) - Number(a[sortKey]); });
+
+        renderMarkets(rows.slice(0, 12));
+        marketsLoaded = true;
+        marketsFailStreak = 0;
+      })
+      .catch(function(){ marketsFailureMessage(); });
+  }
 
   function pollOverview(){
     fetchPreset("overview").then(function(json){

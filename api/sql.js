@@ -21,16 +21,11 @@ const PRESETS = {
   // Forced liquidation fills, most recent first.
   liquidations: `SELECT time, coin, side, price, size, toFloat64(price) * toFloat64(size) AS notional, liquidated_user, liquidation_mark_price FROM hyperliquid_fills WHERE block_time > now() - INTERVAL 24 HOUR AND is_liquidation = 1 ORDER BY block_number DESC, tid DESC LIMIT 40`,
 
-  // Latest snapshot of funding / open interest / price per market.
-  // Three range options instead of one fixed query — Sahil's suggestion
-  // was to try a narrower window than the unfiltered version, since this
-  // table has been consistently slow. 1h is the default (fastest, most
-  // likely to actually finish); 6h/24h are opt-in via the range switcher
-  // in the UI, for whenever someone wants the fuller picture and is willing
-  // to wait a bit longer for it.
-  market_context_1h: `SELECT coin, funding, open_interest, mark_px, oracle_px, prev_day_px, day_ntl_vlm, polled_at FROM hyperliquid_perpetual_market_contexts WHERE polled_at > now() - INTERVAL 1 HOUR ORDER BY polled_at DESC LIMIT 60`,
-  market_context_6h: `SELECT coin, funding, open_interest, mark_px, oracle_px, prev_day_px, day_ntl_vlm, polled_at FROM hyperliquid_perpetual_market_contexts WHERE polled_at > now() - INTERVAL 6 HOUR ORDER BY polled_at DESC LIMIT 60`,
-  market_context_24h: `SELECT coin, funding, open_interest, mark_px, oracle_px, prev_day_px, day_ntl_vlm, polled_at FROM hyperliquid_perpetual_market_contexts WHERE polled_at > now() - INTERVAL 24 HOUR ORDER BY polled_at DESC LIMIT 60`,
+  // Markets moved off SQL Explorer entirely — see /api/markets.js, which
+  // uses Hyperliquid's metaAndAssetCtxs info method instead. That table
+  // was unreliably slow and had data quality issues (day_ntl_vlm/oracle_px
+  // coming back as 0 across every row), and metaAndAssetCtxs sidesteps
+  // both problems by asking the exchange directly for current state.
 
   // Platform-wide daily rollup — today vs yesterday, for the header stat row.
   overview: `SELECT day, total_volume_usd, total_fills, active_traders, liquidation_count, liquidation_volume_usd FROM hyperliquid_metrics_overview ORDER BY day DESC LIMIT 2`,
@@ -70,7 +65,7 @@ module.exports = async function handler(req, res) {
 
   try {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 25000); // market_context responds slower than the other tables — give it real room instead of cutting it off
+    const timeout = setTimeout(() => controller.abort(), 10000); // whale_trades/liquidations/overview are all fast — the slow one (market_context) moved to /api/markets.js
 
     const upstream = await fetch(ENDPOINT, {
       method: "POST",

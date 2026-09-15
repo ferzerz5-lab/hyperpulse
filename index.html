@@ -722,7 +722,20 @@
   // index into the same list of markets, so they're zipped together here.
   function pollMarkets(){
     fetch("/api/markets", { method: "POST", headers: {"Content-Type":"application/json"} })
-      .then(function(r){ return r.json(); })
+      .then(function(r){
+        // Log the raw HTTP status even before trying to parse JSON — a 404
+        // (route doesn't exist, e.g. the file was never deployed) looks
+        // very different from a 500 (deployed but erroring), and neither
+        // was showing up in the debug panel before since nothing logged
+        // until parsing succeeded.
+        if(!r.ok){
+          return r.text().then(function(text){
+            renderDebug("markets", { httpStatus: r.status, body: text.slice(0, 500) });
+            throw new Error("HTTP " + r.status);
+          });
+        }
+        return r.json();
+      })
       .then(function(json){
         renderDebug("markets", json);
         if(json.demo) return; // QN_INFO_URL not set yet — demo mode covers this panel too
@@ -759,7 +772,10 @@
         marketsLoaded = true;
         marketsFailStreak = 0;
       })
-      .catch(function(){ marketsFailureMessage(); });
+      .catch(function(err){
+        renderDebug("markets", { fetchError: String(err && err.message ? err.message : err) });
+        marketsFailureMessage();
+      });
   }
 
   function pollOverview(){

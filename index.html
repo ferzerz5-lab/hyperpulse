@@ -424,7 +424,17 @@
   var canvas = document.getElementById("seismo");
   var ctx = canvas.getContext("2d");
   var trace = []; // {v: -1..1, c: 'up'|'down'|'idle'}
+
+  // TRACE_LEN used to be a fixed 360 regardless of screen size. That's
+  // ~4.4px per bar on a 1600px desktop canvas (fine), but on a ~380px
+  // mobile width it's about 1px per bar — thin enough to anti-alias into
+  // near-invisibility, which is exactly what Sahil was seeing ("3-4 bars
+  // then everything's tiny"). Compute it from the actual canvas width
+  // instead, targeting a legible ~4px per bar on any screen.
   var TRACE_LEN = 360;
+  function computeTraceLen(widthCss){
+    return Math.max(80, Math.min(400, Math.round(widthCss / 4)));
+  }
   for(var i=0;i<TRACE_LEN;i++) trace.push({v:0, c:"idle"});
 
   function pushTrace(v, c){
@@ -441,6 +451,21 @@
     canvas.width = rect.width * dpr;
     canvas.height = rect.height * dpr; // read the actual CSS height (varies on mobile) instead of assuming one fixed size
     ctx.setTransform(dpr,0,0,dpr,0,0);
+
+    // Recompute how many bars actually fit legibly at this width, and
+    // resize the trace buffer to match — pad the front with idle zeros if
+    // growing, trim the oldest entries off the front if shrinking. Either
+    // way the most recent (rightmost) history is preserved.
+    var newLen = computeTraceLen(rect.width);
+    if(newLen !== TRACE_LEN){
+      if(newLen > TRACE_LEN){
+        var pad = newLen - TRACE_LEN;
+        for(var p=0; p<pad; p++) trace.unshift({v:0, c:"idle"});
+      } else {
+        trace.splice(0, TRACE_LEN - newLen);
+      }
+      TRACE_LEN = newLen;
+    }
   }
   window.addEventListener("resize", resizeCanvas);
 
